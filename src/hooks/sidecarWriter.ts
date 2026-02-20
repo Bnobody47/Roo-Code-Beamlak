@@ -1,7 +1,6 @@
 import * as path from "path"
 import * as fs from "fs/promises"
-import { createHash } from "crypto"
-import { randomUUID } from "crypto"
+import { createHash, randomUUID } from "crypto"
 import type { HookContext, HookTraceEntry, AgentTraceEntryTRP1 } from "./types"
 
 function canonicalize(value: unknown): string {
@@ -25,10 +24,16 @@ export async function writeTrace(baseDir: string, entry: HookTraceEntry): Promis
 	const tracePath = path.join(baseDir, "agent_trace.jsonl")
 	// TRP1 schema when we have intent + content (spatial independence / golden thread to spec).
 	if (entry.intent_id != null && (entry.content_hash != null || entry.mutation_summary != null)) {
+		const revisionId = await getRevisionId(baseDir)
+		const ranges =
+			entry.content_hash != null
+				? [{ content_hash: `sha256:${entry.content_hash}`, mutation_class: entry.mutation_class }]
+				: undefined
+
 		const trp1: AgentTraceEntryTRP1 = {
 			id: randomUUID(),
 			timestamp: entry.timestamp,
-			vcs: {},
+			vcs: revisionId ? { revision_id: revisionId } : {},
 			files: [
 				{
 					relative_path: (entry.params?.path as string) ?? (entry.params?.file_path as string) ?? "",
@@ -39,7 +44,7 @@ export async function writeTrace(baseDir: string, entry: HookTraceEntry): Promis
 								entity_type: "AI",
 								model_identifier: entry.model_id ?? entry.provider ?? "",
 							},
-							ranges: entry.content_hash ? [{ content_hash: `sha256:${entry.content_hash}` }] : undefined,
+							ranges,
 							related: [{ type: "specification", value: entry.intent_id }],
 						},
 					],
@@ -75,6 +80,7 @@ export async function updateActiveIntent(baseDir: string, activeIntentId: string
     acceptance_criteria: []
 `
 	await fs.writeFile(filePath, content, { encoding: "utf8" })
+	await ensureSidecarScaffolds(baseDir, activeIntentId)
 }
 
 /** Read active intents from .orchestration/active_intents.yaml (best-effort parse). */
@@ -131,8 +137,64 @@ export function buildTraceEntry(
 		category: ctx.category,
 		params: ctx.params,
 		mutation_summary: ctx.mutationSummary,
+		mutation_class: ctx.mutationClass,
 		content_hash: ctx.contentHash,
 		result: result.allow ? result.message : undefined,
 		error: result.allow ? undefined : result.message,
 	}
+}
+
+/** Best-effort lookup of current git revision for vcs.revision_id. */
+async function getRevisionId(orchestrationDir: string): Promise<string | undefined> {
+	try {
+		const repoRoot = path.dirname(orchestrationDir)
+		const headPath = path.join(repoRoot, ".git", "HEAD")
+		const head = await fs.readFile(headPath, "utf8")
+		const refMatch = head.match(/^ref:\s*(.+)$/m)
+		if (refMatch) {
+			const refPath = path.join(repoRoot, ".git", refMatch[1].trim())
+			const sha = await fs.readFile(refPath, "utf8")
+			return sha.trim()
+		}
+		return head.trim()
+	} catch {
+		return undefined
+	}
+}
+
+/** Ensure intent_map.md and CLAUDE.md exist with minimal scaffolding. */
+async function ensureSidecarScaffolds(baseDir: string, activeIntentId: string): Promise<void> {
+	const intentMapPath = path.join(baseDir, "intent_map.md")
+	const claudePath = path.join(baseDir, "CLAUDE.md")
+
+	try {
+		await fs.access(intentMapPath)
+	} catch {
+		const intentMapContent = `# Intent Map
+
+- **${activeIntentId}** → (link files and AST nodes here over time)
+`
+		await fs.writeFile(intentMapPath, intentMapContent, { encoding: "utf8" })
+	}
+
+	try {
+		await fs.access(claudePath)
+	} catch {
+		const claudeContent = `# CLAUDE.md — Shared Brain
+
+This file records lessons learned, verification failures, and architectural
+decisions across parallel sessions (Architect / Builder / Tester).
+
+## Lessons Learned
+`
+		await fs.writeFile(claudePath, claudeContent, { encoding: "utf8" })
+	}
+}
+
+/** Append a lesson entry to CLAUDE.md (Phase 4 hook-in point). */
+export async function appendLesson(baseDir: string, lesson: string): Promise<void> {
+	const claudePath = path.join(baseDir, "CLAUDE.md")
+	await fs.mkdir(path.dirname(claudePath), { recursive: true })
+	const line = `- ${new Date().toISOString()}: ${lesson}\n`
+	await fs.appendFile(claudePath, line, { encoding: "utf8" })
 }

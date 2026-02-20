@@ -11,6 +11,8 @@ export interface HookContext {
 	userRole?: string
 	timestamp: string
 	mutationSummary?: string
+	/** High-level semantic classification, e.g. AST_REFACTOR vs INTENT_EVOLUTION. */
+	mutationClass?: string
 	contentHash?: string
 	category?: "safe" | "destructive" | "unknown"
 }
@@ -34,6 +36,7 @@ export interface HookTraceEntry {
 	category?: string
 	params: Record<string, unknown>
 	mutation_summary?: string
+	mutation_class?: string
 	content_hash?: string
 	result?: string
 	error?: string
@@ -49,7 +52,7 @@ export interface AgentTraceEntryTRP1 {
 		conversations: Array<{
 			url?: string
 			contributor?: { entity_type: string; model_identifier?: string }
-			ranges?: Array<{ start_line?: number; end_line?: number; content_hash?: string }>
+			ranges?: Array<{ start_line?: number; end_line?: number; content_hash?: string; mutation_class?: string }>
 			related?: Array<{ type: string; value: string }>
 		}>
 	}>
