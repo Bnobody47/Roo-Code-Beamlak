@@ -473,7 +473,7 @@ The hook system must remain safe and predictable under partial failures. Below a
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
-## Interim deliverable checklist
+## Deliverable checklist (interim + final)
 
 - [x] Fork Roo Code and run in Extension Host.
 - [x] Trace tool loop: **presentAssistantMessage** → **switch (block.name)** → tool.handle().
@@ -481,7 +481,9 @@ The hook system must remain safe and predictable under partial failures. Below a
 - [x] **src/hooks/** with HookEngine, classifier, sidecarWriter, types.
 - [x] **select_active_intent** tool and context injection from **active_intents.yaml**.
 - [x] Pre-hook: block mutating tools when **activeIntentId** is missing.
-- [x] Post-hook: append **agent_trace.jsonl** (flat + TRP1 schema when intent+hash present).
-- [ ] Phase 2+: Scope enforcement (owned_scope), HITL approval in hook, .intentignore.
-- [ ] Phase 3+: Full mutation_class (AST_REFACTOR vs INTENT_EVOLUTION), VCS revision_id in trace.
-- [ ] Phase 4: Optimistic locking (stale file detection), lessons in CLAUDE.md.
+- [x] Pre-hook: **scope enforcement** — destructive tools blocked if target file is outside intent **owned_scope**.
+- [x] Post-hook: append **agent_trace.jsonl** (flat + TRP1 schema with content_hash, vcs.revision_id, mutation_class).
+- [x] **.orchestration/** sidecars: **active_intents.yaml**, **agent_trace.jsonl**, **intent_map.md**, **CLAUDE.md** (scaffolded on first intent selection); **appendLesson()** helper for Phase 4.
+- [ ] Phase 2 (optional): HITL approval inside hook (beyond existing tool askApproval), .intentignore.
+- [ ] Phase 3 (optional): Model-provided **mutation_class** (AST_REFACTOR vs INTENT_EVOLUTION) via tool params.
+- [ ] Phase 4 (optional): Optimistic locking (stale file detection), automatic lesson recording on test/lint failure.

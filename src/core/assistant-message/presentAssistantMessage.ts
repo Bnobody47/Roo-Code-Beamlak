@@ -41,7 +41,13 @@ import { codebaseSearchTool } from "../tools/CodebaseSearchTool"
 import * as path from "path"
 import { formatResponse } from "../prompts/responses"
 import { sanitizeToolUseId } from "../../utils/tool-id"
-import { HookEngine, requireActiveIntent, syncActiveIntent, hashMutation } from "../../hooks/HookEngine"
+import {
+	HookEngine,
+	requireActiveIntent,
+	syncActiveIntent,
+	hashMutation,
+	enforceOwnedScope,
+} from "../../hooks/HookEngine"
 import type { HookContext } from "../../hooks/types"
 import { selectActiveIntentTool } from "../tools/SelectActiveIntentTool"
 
@@ -695,7 +701,11 @@ export async function presentAssistantMessage(cline: Task) {
 				cwd: cline.cwd,
 				timestamp: new Date().toISOString(),
 			}
-			const hookEngine = new HookEngine(orchestrationDir, [requireActiveIntent, hashMutation], [syncActiveIntent])
+			const hookEngine = new HookEngine(
+				orchestrationDir,
+				[requireActiveIntent, hashMutation, enforceOwnedScope],
+				[syncActiveIntent],
+			)
 			const { hookResult } = await hookEngine.runWithHooks(hookContext, async () => {
 				switch (block.name) {
 					case "write_to_file":
