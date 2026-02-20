@@ -487,3 +487,80 @@ The hook system must remain safe and predictable under partial failures. Below a
 - [ ] Phase 2 (optional): HITL approval inside hook (beyond existing tool askApproval), .intentignore.
 - [ ] Phase 3 (optional): Model-provided **mutation_class** (AST_REFACTOR vs INTENT_EVOLUTION) via tool params.
 - [ ] Phase 4 (optional): Optimistic locking (stale file detection), automatic lesson recording on test/lint failure.
+
+---
+
+## Complete report: detailed schemas, architecture, and notes
+
+### Schemas
+
+**active_intents.yaml (Intent Specification)**
+
+- **Purpose:** Lifecycle of business requirements; why we are working.
+- **Updated by:** Pre-hooks (agent picks task), Post-hooks (task complete).
+- **Structure:**
+    - `active_intents`: list of intents.
+    - Per intent: `id`, `name`, `status` (e.g. IN_PROGRESS | DONE | BLOCKED), `owned_scope` (glob-like paths), `constraints`, `acceptance_criteria`.
+
+**agent_trace.jsonl (Ledger)**
+
+- **Purpose:** Append-only, machine-readable history linking Intent → Code Hash → Agent Action (spatial independence).
+- **Updated by:** Post-hook after file writes.
+- **TRP1 schema (one JSON object per line):**
+    - `id`: UUID.
+    - `timestamp`: ISO 8601.
+    - `vcs`: `{ "revision_id": "<git_sha>" }`.
+    - `files`: array of `{ "relative_path": string, "conversations": [ { "url": task/session id, "contributor": { "entity_type": "AI", "model_identifier": string }, "ranges": [ { "start_line"?, "end_line"?, "content_hash": "sha256:...", "mutation_class"?: "AST_REFACTOR"|"INTENT_EVOLUTION" } ], "related": [ { "type": "specification", "value": "<intent_id>" } ] } ] }`.
+
+**intent_map.md (Spatial Map)**
+
+- **Purpose:** Maps intents to physical files (“Where is the billing logic?”).
+- **Updated by:** Post-hook when a file is written under an intent (`updateIntentMap`).
+- **Format:** Markdown list: `- **INT-001** → \`path/to/file\``.
+
+**CLAUDE.md (Shared Brain)**
+
+- **Purpose:** Persistent knowledge base: project rules, lessons learned, session notes; shared across Architect/Builder/Tester.
+- **Updated by:** Scaffolded on first intent selection; appended via `appendLesson()` (e.g. on verification failure).
+
+### Architecture in one place
+
+- **Extension Host** runs the hook engine and tools; **Webview** is presentation only.
+- **Single choke point:** All native tool execution goes through `presentAssistantMessage` → `HookEngine.runWithHooks` → `switch (block.name)` → tool.handle().
+- **Pre-hooks:** `requireActiveIntent` (block destructive if no intent), `hashMutation` (content hash), `enforceOwnedScope` (block if file outside intent’s owned_scope).
+- **Post-hooks:** `syncActiveIntent` (write/merge active_intents.yaml), and inside trace flow: `writeTrace` (append agent_trace.jsonl, TRP1 when intent+hash present) and `updateIntentMap` (append intent → file to intent_map.md).
+- **.orchestration/** is the sidecar directory (workspace root); all four artifacts are machine-managed and cross-referenced by intent ID and file paths.
+
+---
+
+## Detailed breakdown: Agent flow and implemented hook
+
+1. **User sends a message** (e.g. “Refactor the auth middleware”) → ClineProvider creates/uses a Task; message goes to the model.
+2. **Model streams content blocks.** For each block, `presentAssistantMessage` runs.
+3. **Block type `tool_use`:**
+    - Build `HookContext` (taskId, activeIntentId, toolName, params, cwd, timestamp).
+    - Instantiate `HookEngine` with pre-hooks `[requireActiveIntent, hashMutation, enforceOwnedScope]` and post-hooks `[syncActiveIntent]`; trace writing is inside the engine after execute.
+4. **Pre-hook phase (in order):**
+    - **requireActiveIntent:** If tool is destructive and `activeIntentId` is missing → return `{ allow: false }`, push tool_result error “No active intent selected…”, skip execution, run post-hooks and write trace (denial).
+    - **hashMutation:** If mutationSummary present, set contentHash (SHA-256).
+    - **enforceOwnedScope:** If destructive and intent has owned_scope, resolve target file from params; if file outside scope → `{ allow: false }`, “Scope Violation…”, skip execution, post-hooks + trace.
+5. **Execute:** If all pre-hooks allow, run `switch (block.name)` (e.g. `select_active_intent`, `write_to_file`, `apply_patch`, …).
+    - **select_active_intent:** SelectActiveIntentTool runs: set `task.activeIntentId`, load `active_intents.yaml`, return `<intent_context>` XML; no file write.
+    - **write_to_file / apply_patch / etc.:** Corresponding tool runs (e.g. WriteToFileTool); may ask user approval; writes to disk.
+6. **Post-hook phase:**
+    - **syncActiveIntent:** If activeIntentId and cwd set, update `.orchestration/active_intents.yaml` (and ensure intent_map.md + CLAUDE.md exist).
+    - **Trace:** `buildTraceEntry` + `writeTrace`: append to `agent_trace.jsonl` (flat or TRP1 with intent_id, content_hash, vcs.revision_id, mutation_class); if TRP1 and file path present, call `updateIntentMap` to append intent → file to `intent_map.md`.
+7. **Result:** Tool result (or error) is pushed to the conversation; stream continues.  
+   So: every mutating tool is gated by intent and scope, and every such action is traced and reflected in the intent map; the shared brain (CLAUDE.md) is scaffolded and can be appended to for lessons.
+
+---
+
+## Summary of what has been achieved
+
+- **Phase 0:** Mapped the extension (entry, provider, task, tool loop, prompt builder); documented in ARCHITECTURE_NOTES.
+- **Phase 1:** Implemented the Reasoning Loop: `select_active_intent(intent_id)` tool; context injection from `active_intents.yaml` into `<intent_context>`; gatekeeper pre-hook so destructive tools are blocked without an active intent; prompt change so the agent must call select_active_intent before mutating.
+- **Phase 2 (core):** Hook engine as middleware (pre/post hooks); tool classification (safe vs destructive); scope enforcement so destructive tools only touch files in the active intent’s `owned_scope`; clear error messages for “no intent” and “scope violation”.
+- **Phase 3 (core):** Append-only `agent_trace.jsonl` with TRP1 schema: intent_id, content_hash (SHA-256), vcs.revision_id, mutation_class in ranges; intent_map.md updated on write so artifacts stay cross-referenced; spatial independence via content hashing.
+- **.orchestration/ artifacts:** Repo includes a `.orchestration/` directory from a real run: **active_intents.yaml** (multiple intents, diverse statuses), **agent_trace.jsonl** (multi-session trace entries), **intent_map.md** (intent → files), **CLAUDE.md** (shared brain: rules, lessons, session notes). All four are machine-managed and internally consistent.
+- **Documentation:** ARCHITECTURE_NOTES contains theoretical grounding (Cognitive Debt, Trust Debt, Context Rot), blueprint diagrams with data payloads, failure modes and mitigations, detailed schemas, and a step-by-step agent and hook breakdown.
+- **Codebase:** Clean `src/hooks/` (HookEngine, types, classifier, sidecarWriter); SelectActiveIntentTool; hook wiring in presentAssistantMessage; no mutating tool execution outside the hook path.
