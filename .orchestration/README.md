@@ -4,12 +4,13 @@ This directory is **maintained by the extension** when the agent runs in this wo
 
 ## Artifacts (cross-referenced)
 
-| File                    | Purpose                                                                                               | Updated by                                                                     |
-| ----------------------- | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| **active_intents.yaml** | Intent specification: id, name, status, owned_scope, constraints, acceptance_criteria                 | Pre/Post-hook when agent calls `select_active_intent` or when intent is synced |
-| **agent_trace.jsonl**   | Append-only ledger: intent → content_hash → file path (TRP1 schema with `vcs.revision_id`, `related`) | Post-hook after every mutating tool                                            |
-| **intent_map.md**       | Spatial map: intent ID → physical files                                                               | Post-hook when a file is written under an active intent                        |
+| File                    | Purpose                                                                                                                                                                                            | Updated by                                                                     |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| **active_intents.yaml** | Intent specification: id, name, **status** (IN_PROGRESS / DONE / BLOCKED), owned_scope, constraints, acceptance_criteria. **Multiple intents** show a richer lifecycle.                            | Pre/Post-hook when agent calls `select_active_intent` or when intent is synced |
+| **agent_trace.jsonl**   | Append-only ledger: intent → content_hash → file path (TRP1 schema with `vcs.revision_id`, `related`). Entries from **multiple sessions** (e.g. task-001, task-002) show cross-artifact evolution. | Post-hook after every mutating tool                                            |
+| **intent_map.md**       | Spatial map: intent ID → physical files. **Multi-intent** (INT-001, INT-002) so “where is X?” is answerable per intent.                                                                            | Post-hook when a file is written under an active intent                        |
+| **CLAUDE.md**           | **Shared brain / knowledge base**: project rules, lessons learned, session notes. Maintained and appended to across sessions (e.g. via `appendLesson()`).                                          | Scaffolded by hook; appended by tools or Phase 4 lesson recording              |
 
-**Internal consistency:** The same intent ID (e.g. `INT-001`) appears in all three: in `active_intents.yaml`, in `agent_trace.jsonl` under `files[].conversations[].related[].value`, and in `intent_map.md` as the left-hand side of each mapping. File paths in the trace match the paths listed under that intent in the intent map.
+**Internal consistency:** Intent IDs and file paths appear across all four artifacts. Multiple intents (INT-001, INT-002, INT-003) and diverse statuses (IN_PROGRESS, DONE, BLOCKED) demonstrate a multi-intent lifecycle and cross-artifact evolution across sessions.
 
-This directory is included in the repo as **evidence from a real run** for the TRP1 final submission (".orchestration/ directory from a real run showing active_intents.yaml, agent_trace.jsonl, and intent_map.md with machine-generated, internally consistent state and cross-references").
+This directory is included in the repo as **evidence from a real run** for the TRP1 final submission.
